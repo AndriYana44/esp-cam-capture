@@ -46,6 +46,24 @@ DHT dht(13, DHT22);
 const int timerInterval = 30000;    // time between each HTTP POST image
 unsigned long previousMillis = 0;   // last time image was sent
 
+void Task1(void * parameter) {
+  for(;;) {
+    sendDHT();
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
+
+void Task2(void * parameter) {
+  for(;;) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= timerInterval) {
+      // capture
+      sendPhoto();
+      previousMillis = currentMillis;
+    }
+  }
+}
+
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
   Serial.begin(115200);
@@ -112,24 +130,29 @@ void setup() {
     delay(1000);
     ESP.restart();
   }
+
+  xTaskCreate(
+      Task1,
+      "send dht sensor to webserver",
+      1000,
+      NULL,
+      1,
+      NULL);
+  
+  xTaskCreate(
+      Task2,
+      "capturing and send to webserver",
+      10000,
+      NULL,
+      1,
+      NULL);
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
-  float kelembaban = dht.readHumidity();
-  float suhu = dht.readTemperature();
   
-  if (currentMillis - previousMillis >= timerInterval) {
-    // capture
-    sendPhoto(kelembaban, suhu);
-    previousMillis = currentMillis;
-  }
-  
-  sendDHT(kelembaban, suhu);
-  delay(2000);
 }
 
-String sendPhoto(float kelembaban, float suhu) {
+String sendPhoto() {
   String getAll;
   String getBody;
 
@@ -160,7 +183,6 @@ String sendPhoto(float kelembaban, float suhu) {
     uint8_t *fbBuf = fb->buf;
     size_t fbLen = fb->len;
     for (size_t n=0; n<fbLen; n=n+1024) {
-      sendDHT(kelembaban, suhu);
       if (n+1024 < fbLen) {
         client.write(fbBuf, 1024);
         fbBuf += 1024;
@@ -203,7 +225,9 @@ String sendPhoto(float kelembaban, float suhu) {
   return getBody;
 }
 
-void sendDHT(float kelembaban, float suhu) {
+void sendDHT() {
+  float kelembaban = dht.readHumidity();
+  float suhu = dht.readTemperature();
   Serial.print("kelembaban: ");
   Serial.print(kelembaban);
   Serial.print(" ");
