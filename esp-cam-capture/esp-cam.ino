@@ -6,14 +6,16 @@
 #include "soc/rtc_cntl_reg.h"
 #include "esp_camera.h"
 
-const char* ssid = "BP";
-const char* password = "1sampai8";
+const char* ssid[2] = {"BP", "vivo 2019"};
+const char* pass[2] = {"1sampai8", "12345678an"};
+//const char* ssid = "BP";
+//const char* password = "1sampai8";
 
-String serverName = "192.168.43.150";   // REPLACE WITH YOUR Raspberry Pi IP ADDRESS
-//String serverName = "example.com";   // OR REPLACE WITH YOUR DOMAIN NAME
+String serverName = "192.168.43.150";   
 
 String serverPath = "/upload";     // The default serverPath should be upload.php
 
+WiFiServer server(80);
 const int serverPort = 80;
 
 WiFiClient client;
@@ -46,23 +48,7 @@ DHT dht(13, DHT22);
 const int timerInterval = 30000;    // time between each HTTP POST image
 unsigned long previousMillis = 0;   // last time image was sent
 
-void Task1(void * parameter) {
-  for(;;) {
-    sendDHT();
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-  }
-}
-
-void Task2(void * parameter) {
-  for(;;) {
-    unsigned long currentMillis = millis();
-    if (currentMillis - previousMillis >= timerInterval) {
-      // capture
-      sendPhoto();
-      previousMillis = currentMillis;
-    }
-  }
-}
+TaskHandle_t Task1;
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
@@ -77,15 +63,29 @@ void setup() {
   digitalWrite(RELAYPIN_1, LOW);
   digitalWrite(RELAYPIN_2, HIGH);
 
-  WiFi.mode(WIFI_STA);
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);  
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(500);
+  for(short i=0; i<2; i++) {
+    Serial.println();
+    Serial.print("Connecting to ");
+    Serial.print("SSID: ");
+    Serial.println(ssid[i]);
+    Serial.print("Password: ");
+    Serial.println(pass[i]);
+
+    WiFi.begin(ssid[i], pass[i]);
+    int WiFi_timeout_count = 0;
+    while (WiFi.status() != WL_CONNECTED && WiFi_timeout_count<30) { //waiting 10 sec
+      delay(500);
+      Serial.print(".");
+      ++WiFi_timeout_count;
+    }
+    
+    if(WiFi.status() == WL_CONNECTED) {
+      Serial.println("WiFi Connected!");
+      Serial.println(WiFi.localIP());
+      break;
+    }
   }
+  
   Serial.println();
   Serial.print("ESP32-CAM IP Address: ");
   Serial.println(WiFi.localIP());
@@ -131,25 +131,35 @@ void setup() {
     ESP.restart();
   }
 
-  xTaskCreate(
-      Task1,
-      "send dht sensor to webserver",
-      1000,
-      NULL,
-      1,
-      NULL);
-  
-  xTaskCreate(
-      Task2,
-      "capturing and send to webserver",
-      10000,
-      NULL,
-      1,
-      NULL);
+  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
+  xTaskCreatePinnedToCore(
+                    Task1code,   /* Task function. */
+                    "Task1",     /* name of task. */
+                    10000,       /* Stack size of task */
+                    NULL,        /* parameter of the task */
+                    1,           /* priority of the task */
+                    &Task1,      /* Task handle to keep track of created task */
+                    0);          /* pin task to core 0 */         /* pin task to core 1 */
 }
 
+//Task1code: blinks an LED every 700 ms
+void Task1code( void * pvParameters ){
+  for(;;){
+    sendDHT();
+    delay(500);
+  }
+}
+
+
 void loop() {
-  
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= timerInterval) {
+    // capture
+    sendPhoto();
+    previousMillis = currentMillis;
+  }
+//
+//  sendDHT();
 }
 
 String sendPhoto() {
